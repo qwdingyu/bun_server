@@ -1,0 +1,29 @@
+{
+  "name": "bun-server-framework",
+  "version": "1.0.0",
+  "description": "A modern web framework based on Bun.js + Hono + Drizzle ORM",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/main.js",
+    "start": "bun run src/main.js",
+    "build": "bun build --compile --minify --outfile dist/server src/main.js",
+    "build:linux": "bun build --compile --target linux --minify --outfile dist/server-linux src/main.js",
+    "build:macos": "bun build --compile --target macos --minify --outfile dist/server-macos src/main.js",
+    "build:windows": "bun build --compile --target=bun-windows-x64 --minify --outfile=dist/server.exe src/main.js",
+    "test": "bun test",
+    "db:init": "bun run scripts/init-db.mjs",
+    "db:reset": "bun run scripts/reset-db.mjs",
+    "service:start": "bun run scripts/service.mjs start",
+    "service:stop": "bun run scripts/service.mjs stop",
+    "service:restart": "bun run scripts/service.mjs restart",
+    "service:status": "bun run scripts/service.mjs status"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.2",
+    "drizzle-orm": "^0.44.5",
+    "hono": "^4.9.7",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.14.5",
+    "yaml": "^2.8.1"
+  }
+}

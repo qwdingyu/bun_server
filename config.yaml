@@ -1,0 +1,105 @@
+server:
+  host: 0.0.0.0
+  port: 5050
+  timeout: 30000
+
+database:
+  type: sqlite
+  path: ./data/app.db
+  pool:
+    min: 5
+    max: 20
+    idle_timeout: 30000
+
+# 认证配置
+auth:
+  jwt_secret: your-super-secret-jwt-key-change-in-production-please
+  jwt_expires_in: 24h
+  jwt_refresh_expires_in: 7d
+  password_min_length: 6
+  enable_refresh_tokens: true
+
+# CORS配置
+cors:
+  origin: '*'
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+  allowed_headers:
+    - 'Content-Type'
+    - 'Authorization'
+    - 'X-Requested-With'
+    - 'X-API-Key'
+    - 'Accept'
+  credentials: true
+  max_age: 86400
+
+# 安全配置
+security:
+  # 安全头
+  headers:
+    X-Content-Type-Options: nosniff
+    X-Frame-Options: DENY
+    X-XSS-Protection: '1; mode=block'
+    Referrer-Policy: strict-origin-when-cross-origin
+    Permissions-Policy: 'camera=(), microphone=(), geolocation=()'
+
+  # 内容安全策略
+  csp:
+    default-src: ["'self'"]
+    script-src: ["'self'", "'unsafe-inline'"]
+    style-src: ["'self'", "'unsafe-inline'"]
+    img-src: ["'self'", 'data:', 'https:']
+    font-src: ["'self'"]
+    connect-src: ["'self'"]
+    frame-ancestors: ["'none'"]
+
+  # 速率限制
+  rate_limit:
+    window_ms: 900000 # 15分钟
+    max_requests: 100
+    message: '请求过于频繁，请稍后重试'
+
+  # IP白名单（空数组表示允许所有IP）
+  ip_whitelist: []
+
+  # 用户代理过滤
+  block_unknown_user_agents: false
+  blocked_user_agents: []
+  allowed_user_agents: []
+
+  # 请求大小限制（字节）
+  max_request_size: 1048576 # 1MB
+
+# 日志配置
+logging:
+  level: info
+  log_directory: ./logs
+  max_files: 10
+  max_size: 10485760 # 10MB
+  format: json
+  console_output: true
+
+# API配置
+api:
+  prefix: /api
+  version: v1
+  enable_docs: true
+  docs_path: /docs
+
+# 监控配置
+monitoring:
+  enable_metrics: true
+  metrics_path: /metrics
+  health_check_interval: 30000
+
+# 缓存配置
+cache:
+  enable: false
+  type: memory # memory | redis
+  ttl: 300000 # 5分钟
+  max_size: 1000
+
+# 开发配置
+development:
+  enable_hot_reload: true
+  enable_debug_logs: true
+  mock_data: false
