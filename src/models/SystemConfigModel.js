@@ -66,18 +66,23 @@ class SystemConfigModel extends BaseModel {
     try {
       const existing = await this.findOne({ config_key: key })
 
+      const normalizedValue = String(value)
+
       if (existing) {
         await this.update(existing.id, {
-          config_value: String(value),
+          config_value: normalizedValue,
           updated_at: getCurrentTimestamp()
         })
       } else {
         await this.create({
           config_key: key,
-          config_value: String(value),
+          config_value: normalizedValue,
           updated_at: getCurrentTimestamp()
         })
       }
+
+      // 同步更新内存缓存，避免读取到过期的旧值
+      this.cache.set(key, normalizedValue)
 
       return true
     } catch (error) {
@@ -132,13 +137,14 @@ class SystemConfigModel extends BaseModel {
     try {
       return await this.transaction(async (trx) => {
         for (const [key, value] of Object.entries(configs)) {
+          const normalizedValue = String(value)
           const existing = await this.findOne({ config_key: key }, undefined, trx)
 
           if (existing) {
             await this.update(
               existing.id,
               {
-                config_value: String(value),
+                config_value: normalizedValue,
                 updated_at: getCurrentTimestamp()
               },
               trx
@@ -147,12 +153,15 @@ class SystemConfigModel extends BaseModel {
             await this.create(
               {
                 config_key: key,
-                config_value: String(value),
+                config_value: normalizedValue,
                 updated_at: getCurrentTimestamp()
               },
               trx
             )
           }
+
+          // 批量操作同样需要刷新缓存中的对应配置值
+          this.cache.set(key, normalizedValue)
         }
 
         return true

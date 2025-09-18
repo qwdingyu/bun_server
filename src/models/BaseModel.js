@@ -1,5 +1,6 @@
-import { eq, and, isNull, desc, asc, sql } from 'drizzle-orm'
+import { eq, and, isNull, desc, asc, sql, like } from 'drizzle-orm'
 import { getDrizzleInstance } from '../config/database.js'
+import schema from './schema/index.js'
 import { getCurrentTimestamp } from '../utils/datetime.js'
 
 export default class BaseModel {
@@ -10,6 +11,139 @@ export default class BaseModel {
     // 使用简化的字段列表，避免类型推断
     this.safeFields = this.getSimpleFieldList()
     this.safeOrderFields = ['id', 'created_at', 'updated_at']
+    // 缓存一份代理过的数据库实例，避免重复创建 Proxy
+    this._dbProxy = null
+  }
+
+  /**
+   * 获取底层的 Drizzle 实例。
+   * 使用 getter 的方式可以确保在 initDb 完成后再获取连接，
+   * 避免在模型初始化阶段立即访问尚未准备好的数据库。
+   */
+  get db() {
+    const drizzleDb = getDrizzleInstance()
+
+    // 当底层实例变化时需要重新创建代理
+    if (!this._dbProxy || this._dbProxy.raw !== drizzleDb) {
+      this._dbProxy = {
+        raw: drizzleDb,
+        proxy: this.createDbProxy(drizzleDb)
+      }
+    }
+
+    return this._dbProxy.proxy
+  }
+
+  /**
+   * 创建一个包装过的数据库代理对象，增强 where/first 等常用方法的易用性，
+   * 以适配测试脚本中使用的简单对象写法。
+   */
+  createDbProxy(drizzleDb) {
+    const resolveTable = (tableInput) => {
+      if (!tableInput) {
+        return this.schema
+      }
+
+      if (typeof tableInput === 'string') {
+        const cleaned = tableInput.replaceAll('`', '').replaceAll('"', '')
+        if (schema[cleaned]) {
+          return schema[cleaned]
+        }
+      }
+
+      return tableInput
+    }
+
+    const normalizeWhere = (table, condition) => {
+      if (!condition || typeof condition !== 'object' || condition._?.brand) {
+        return condition
+      }
+
+      const expressions = []
+
+      for (const [key, value] of Object.entries(condition)) {
+        if (!table?.[key]) {
+          continue
+        }
+
+        if (value === null) {
+          expressions.push(isNull(table[key]))
+        } else if (typeof value === 'string' && value.includes('%')) {
+          expressions.push(like(table[key], value))
+        } else {
+          expressions.push(eq(table[key], value))
+        }
+      }
+
+      if (expressions.length === 0) {
+        throw new Error('无法根据提供的条件构建 where 子句')
+      }
+
+      return expressions.length === 1 ? expressions[0] : and(...expressions)
+    }
+
+    const wrapWhere = (builder, table) => {
+      if (!builder || typeof builder.where !== 'function') {
+        return builder
+      }
+
+      const originalWhere = builder.where.bind(builder)
+      builder.where = (condition) => originalWhere(normalizeWhere(table, condition))
+      return builder
+    }
+
+    const attachFirst = (builder) => {
+      if (!builder) {
+        return builder
+      }
+
+      if (!builder.first) {
+        builder.first = async () => {
+          const rows = await builder.limit(1)
+          return Array.isArray(rows) ? rows[0] ?? null : rows
+        }
+      }
+
+      return builder
+    }
+
+    return new Proxy(drizzleDb, {
+      get: (target, prop, receiver) => {
+        if (prop === 'update') {
+          return (tableInput) => {
+            const table = resolveTable(tableInput)
+            const builder = target.update(table)
+
+            const originalSet = builder.set.bind(builder)
+            builder.set = (values) => {
+              const result = originalSet(values)
+              return wrapWhere(result, table)
+            }
+
+            return wrapWhere(builder, table)
+          }
+        }
+
+        if (prop === 'select') {
+          return (...args) => {
+            const builder = target.select(...args)
+            const originalFrom = builder.from.bind(builder)
+
+            builder.from = (tableInput) => {
+              const table = resolveTable(tableInput)
+              const result = originalFrom(table)
+              wrapWhere(result, table)
+              attachFirst(result)
+              return result
+            }
+
+            return builder
+          }
+        }
+
+        return Reflect.get(target, prop, receiver)
+      }
+    })
   }
 
   /**
@@ -57,20 +191,35 @@ export default class BaseModel {
     const conditions = []
 
     Object.keys(filter).forEach((key) => {
-      if (this.safeFields.includes(key)) {
+      // 仅处理模型定义过且允许查询的字段，避免SQL注入风险
+      if (this.safeFields.includes(key) && this.schema[key]) {
+        const column = this.schema[key]
         const value = filter[key]
 
+        if (value === undefined) {
+          // 未提供具体的过滤值时忽略该字段
+          return
+        }
+
         if (value === null) {
-          conditions.push(sql`${key} IS NULL`)
+          // NULL 值必须使用 isNull 构造条件
+          conditions.push(isNull(column))
         } else if (typeof value === 'string' && value.includes('%')) {
-          conditions.push(sql`${key} LIKE ${value}`)
+          // 模糊查询直接使用 like 构造表达式
+          conditions.push(like(column, value))
         } else {
-          conditions.push(sql`${key} = ${value}`)
+          // 普通等值查询统一使用 eq，保证列引用正确
+          conditions.push(eq(column, value))
         }
       }
     })
 
-    return conditions.length > 0 ? and(...conditions) : undefined
+    if (conditions.length === 0) {
+      return undefined
+    }
+
+    // drizzle 的 and 需要至少两个条件，因此根据条件数量进行处理
+    return conditions.length === 1 ? conditions[0] : and(...conditions)
   }
 
   /**
