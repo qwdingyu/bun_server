@@ -1,5 +1,150 @@
 import { eq, and, isNull, desc, asc, sql } from 'drizzle-orm'
 import { getDrizzleInstance } from '../config/database.js'
+import schemaTables from './schema/index.js'
+
+const drizzleColumnsSymbol = Symbol.for('drizzle:Columns')
+
+/**
+ * 将外部传入的表引用（字符串或Drizzle表对象）解析为Drizzle表对象
+ * @param {string|Object} tableRef - 表名称或表对象
+ * @returns {Object|null}
+ */
+function resolveTable(tableRef) {
+  if (!tableRef) {
+    return null
+  }
+
+  if (typeof tableRef === 'string') {
+    return schemaTables?.[tableRef] || null
+  }
+
+  return tableRef
+}
+
+/**
+ * 获取指定表的列定义映射
+ * @param {Object|null} table - Drizzle表对象
+ * @returns {Object}
+ */
+function getTableColumns(table) {
+  if (!table || typeof table !== 'object') {
+    return {}
+  }
+
+  return table[drizzleColumnsSymbol] || {}
+}
+
+/**
+ * 基于表结构构建通用的 where 条件
+ * @param {Object|null} table - Drizzle表对象
+ * @param {Object} filter - 查询过滤条件
+ * @returns {import('drizzle-orm').SQL<unknown>|undefined}
+ */
+function buildTableWhereClause(table, filter) {
+  if (!filter || typeof filter !== 'object') {
+    return undefined
+  }
+
+  const columns = getTableColumns(table)
+  const conditions = []
+
+  Object.entries(filter).forEach(([key, value]) => {
+    const column = columns[key]
+    if (!column) {
+      return
+    }
+
+    if (value === null) {
+      conditions.push(isNull(column))
+    } else if (typeof value === 'string' && value.includes('%')) {
+      conditions.push(sql`${column} LIKE ${value}`)
+    } else {
+      conditions.push(eq(column, value))
+    }
+  })
+
+  if (conditions.length === 0) {
+    return undefined
+  }
+
+  return conditions.reduce((acc, condition) => (acc ? and(acc, condition) : condition), undefined)
+}
+
+/**
+ * 创建兼容旧测试脚本的数据库访问对象
+ * 支持 update(...).set(...).where(...) 以及 select().from(...).where(...).first()
+ * @returns {Object}
+ */
+function createCompatDb() {
+  return {
+    update(tableRef) {
+      const table = resolveTable(tableRef)
+
+      return {
+        set(setData = {}) {
+          return {
+            where: async (filter = {}) => {
+              const db = getDrizzleInstance()
+              if (!table) {
+                throw new Error('无法解析更新操作的表名称')
+              }
+
+              const whereClause = buildTableWhereClause(table, filter)
+              let query = db.update(table).set(setData)
+              if (whereClause) {
+                query = query.where(whereClause)
+              }
+              return await query
+            }
+          }
+        }
+      }
+    },
+
+    select(selectFields = null) {
+      return {
+        from(tableRef) {
+          const table = resolveTable(tableRef)
+          if (!table) {
+            throw new Error('无法解析查询操作的表名称')
+          }
+
+          const executeQuery = async (filter = {}) => {
+            const db = getDrizzleInstance()
+            const whereClause = buildTableWhereClause(table, filter)
+            const columns = selectFields || getTableColumns(table)
+
+            let query = db.select(columns).from(table)
+            if (whereClause) {
+              query = query.where(whereClause)
+            }
+
+            return await query
+          }
+
+          const wrapResult = (rowsPromise) => ({
+            first: async () => {
+              const rows = await rowsPromise
+              return rows[0] || null
+            },
+            all: async () => await rowsPromise
+          })
+
+          return {
+            where(filter = {}) {
+              return wrapResult(executeQuery(filter))
+            },
+            first: async () => {
+              const rows = await executeQuery()
+              return rows[0] || null
+            },
+            all: async () => await executeQuery()
+          }
+        }
+      }
+    }
+  }
+}
 import { getCurrentTimestamp } from '../utils/datetime.js'
 
 export default class BaseModel {
@@ -10,6 +155,11 @@ export default class BaseModel {
     // 使用简化的字段列表，避免类型推断
     this.safeFields = this.getSimpleFieldList()
     this.safeOrderFields = ['id', 'created_at', 'updated_at']
+    // 通过惰性 getter 暴露兼容旧有测试脚本的数据库访问接口
+    Object.defineProperty(this, 'db', {
+      enumerable: true,
+      get: () => createCompatDb()
+    })
   }
 
   /**
@@ -54,23 +204,44 @@ export default class BaseModel {
    * 构建基础的 where 条件，避免复杂类型推断
    */
   buildWhereClause(filter) {
+    // 使用条件数组逐项拼接查询条件，确保始终引用 Drizzle 定义的列对象
     const conditions = []
 
     Object.keys(filter).forEach((key) => {
-      if (this.safeFields.includes(key)) {
-        const value = filter[key]
+      // 仅允许访问白名单字段，避免 SQL 注入风险
+      if (!this.safeFields.includes(key) || !this.schema[key]) {
+        return
+      }
 
-        if (value === null) {
-          conditions.push(sql`${key} IS NULL`)
-        } else if (typeof value === 'string' && value.includes('%')) {
-          conditions.push(sql`${key} LIKE ${value}`)
-        } else {
-          conditions.push(sql`${key} = ${value}`)
-        }
+      const value = filter[key]
+
+      if (value === null) {
+        // 等价于 column IS NULL
+        conditions.push(isNull(this.schema[key]))
+      } else if (typeof value === 'string' && value.includes('%')) {
+        // LIKE 查询需要使用 sql 模板插入列对象
+        conditions.push(sql`${this.schema[key]} LIKE ${value}`)
+      } else {
+        // 默认使用等值匹配
+        conditions.push(eq(this.schema[key], value))
       }
     })
 
-    return conditions.length > 0 ? and(...conditions) : undefined
+    if (conditions.length === 0) {
+      return undefined
+    }
+
+    if (conditions.length === 1) {
+      return conditions[0]
+    }
+
+    // 多个条件时使用 and 逐个拼接，避免 and() 空参数导致的异常
+    let whereClause = conditions[0]
+    for (let i = 1; i < conditions.length; i += 1) {
+      whereClause = and(whereClause, conditions[i])
+    }
+
+    return whereClause
   }
 
   /**
