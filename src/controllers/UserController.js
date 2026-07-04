@@ -1,5 +1,5 @@
-import { userModel } from '../models/index.js'
-import { generateTokenPair, refreshTokenPair, extractBearerToken, verifyToken } from '../utils/jwt/index.js'
+import { sessionModel, userModel } from '../models/index.js'
+import { generateTokenPair, verifyToken } from '../utils/jwt/index.js'
 import { asyncHandler } from '../middleware/error/index.js'
 import { validateBody, validateQuery, validateParams, patterns, schemas } from '../middleware/validation/index.js'
 import AppError from '../utils/AppError.js'
@@ -412,6 +412,14 @@ class UserController {
 
       // 生成JWT token对
       const tokenPair = generateTokenPair(user)
+      await sessionModel.createSession({
+        userId: user.id,
+        accessToken: tokenPair.accessToken,
+        refreshToken: tokenPair.refreshToken,
+        expiresAt: tokenPair.refreshTokenExpiresAt,
+        userAgent,
+        ipAddress: clientIp
+      })
 
       const duration = Date.now() - startTime
       logger.performance('userLogin', duration, { user_id: user.id })
@@ -481,22 +489,28 @@ class UserController {
         throw new AppError('刷新令牌是必需的', 400, 'MISSING_REFRESH_TOKEN')
       }
 
-      const result = refreshTokenPair(refreshToken)
-
-      if (!result.success) {
+      const tokenResult = verifyToken(refreshToken)
+      if (!tokenResult.success) {
         throw new AppError('刷新令牌无效或已过期', 401, 'INVALID_REFRESH_TOKEN')
       }
 
-      // 这里应该从数据库获取最新的用户信息来生成新token
-      // 简化实现，实际应用中需要查询数据库
-      const tokenResult = verifyToken(refreshToken)
+      const session = await sessionModel.findActiveByRefreshToken(refreshToken)
+      if (!session) {
+        throw new AppError('刷新令牌已失效或会话已登出', 401, 'REFRESH_SESSION_REVOKED')
+      }
+
       const user = await userModel.findById(tokenResult.payload.id)
 
-      if (!user || user.status !== 'active') {
+      if (!user || user.status !== 'active' || session.user_id !== user.id) {
         throw new AppError('用户不存在或已被禁用', 401, 'USER_INVALID')
       }
 
       const newTokenPair = generateTokenPair(user)
+      await sessionModel.rotateRefreshToken(session.id, {
+        accessToken: newTokenPair.accessToken,
+        refreshToken: newTokenPair.refreshToken,
+        expiresAt: newTokenPair.refreshTokenExpiresAt
+      })
 
       const duration = Date.now() - startTime
       logger.performance('refreshToken', duration, { user_id: user.id })
@@ -560,6 +574,14 @@ class UserController {
 
       // 生成JWT token对
       const tokenPair = generateTokenPair(user)
+      await sessionModel.createSession({
+        userId: user.id,
+        accessToken: tokenPair.accessToken,
+        refreshToken: tokenPair.refreshToken,
+        expiresAt: tokenPair.refreshTokenExpiresAt,
+        userAgent,
+        ipAddress: clientIp
+      })
 
       const duration = Date.now() - startTime
       logger.performance('userRegister', duration, { user_id: user.id })
@@ -618,9 +640,18 @@ class UserController {
 
     try {
       const user = c.get('user')
+      let refreshToken = null
 
-      // 这里可以添加token黑名单逻辑
-      // 简化实现，实际应用中应该将token加入黑名单
+      try {
+        const body = await c.req.json()
+        refreshToken = body?.refreshToken || null
+      } catch (_) {
+        refreshToken = null
+      }
+
+      if (refreshToken) {
+        await sessionModel.revokeByRefreshToken(refreshToken)
+      }
 
       const duration = Date.now() - startTime
       logger.performance('userLogout', duration, { user_id: user?.id })
@@ -709,6 +740,97 @@ class UserController {
       })
     } catch (error) {
       logger.error('获取用户统计失败', error)
+      throw error
+    }
+  })
+
+  /**
+   * 批量更新用户状态
+   */
+  batchUpdateStatus = asyncHandler(async (c) => {
+    const startTime = Date.now()
+
+    try {
+      const { userIds, status } = c.get('validatedBody')
+      const currentUser = c.get('user')
+
+      if (userIds.includes(currentUser?.id)) {
+        throw new AppError('不能批量修改自己的状态', 400, 'CANNOT_MODIFY_SELF')
+      }
+
+      const result = await userModel.batchUpdateStatus(userIds, status)
+      const duration = Date.now() - startTime
+
+      logger.performance('batchUpdateUserStatus', duration, {
+        requested: userIds.length,
+        affected: result.affected
+      })
+
+      logger.business('users_status_batch_updated', {
+        requested_ids: userIds,
+        affected_ids: result.ids,
+        status,
+        changed_by: currentUser?.id
+      })
+
+      return c.json({
+        success: true,
+        message: '批量更新用户状态成功',
+        data: result,
+        meta: {
+          timestamp: new Date().toISOString(),
+          duration: `${duration}ms`
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof AppError)) {
+        logger.error('批量更新用户状态失败', error)
+      }
+      throw error
+    }
+  })
+
+  /**
+   * 批量软删除用户
+   */
+  batchDeleteUsers = asyncHandler(async (c) => {
+    const startTime = Date.now()
+
+    try {
+      const { userIds } = c.get('validatedBody')
+      const currentUser = c.get('user')
+
+      if (userIds.includes(currentUser?.id)) {
+        throw new AppError('不能批量删除自己的账户', 400, 'CANNOT_DELETE_SELF')
+      }
+
+      const result = await userModel.batchSoftDeleteUsers(userIds)
+      const duration = Date.now() - startTime
+
+      logger.performance('batchDeleteUsers', duration, {
+        requested: userIds.length,
+        affected: result.affected
+      })
+
+      logger.business('users_batch_deleted', {
+        requested_ids: userIds,
+        affected_ids: result.ids,
+        deleted_by: currentUser?.id
+      })
+
+      return c.json({
+        success: true,
+        message: '批量删除用户成功',
+        data: result,
+        meta: {
+          timestamp: new Date().toISOString(),
+          duration: `${duration}ms`
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof AppError)) {
+        logger.error('批量删除用户失败', error)
+      }
       throw error
     }
   })

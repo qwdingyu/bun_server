@@ -7,7 +7,7 @@ const config = loadConfig()
  */
 export function corsMiddleware(options = {}) {
   const defaultOptions = {
-    origin: config.cors?.origin || '*',
+    origin: config.cors?.origin || ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
     methods: config.cors?.methods || ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: config.cors?.allowed_headers || [
       'Content-Type',
@@ -16,7 +16,7 @@ export function corsMiddleware(options = {}) {
       'X-API-Key',
       'Accept'
     ],
-    credentials: config.cors?.credentials || true,
+    credentials: config.cors?.credentials === true,
     maxAge: config.cors?.max_age || 86400 // 24小时
   }
 
@@ -28,13 +28,15 @@ export function corsMiddleware(options = {}) {
 
     // 处理预检请求
     if (method === 'OPTIONS') {
+      const allowedOrigin = getOrigin(origin, corsOptions.origin, corsOptions.credentials)
       // 设置 CORS 头
-      c.header('Access-Control-Allow-Origin', getOrigin(origin, corsOptions.origin))
+      c.header('Access-Control-Allow-Origin', allowedOrigin)
       c.header('Access-Control-Allow-Methods', corsOptions.methods.join(', '))
       c.header('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '))
       c.header('Access-Control-Max-Age', corsOptions.maxAge.toString())
+      c.header('Vary', 'Origin')
 
-      if (corsOptions.credentials) {
+      if (corsOptions.credentials && allowedOrigin !== '*') {
         c.header('Access-Control-Allow-Credentials', 'true')
       }
 
@@ -42,8 +44,10 @@ export function corsMiddleware(options = {}) {
     }
 
     // 设置 CORS 头
-    c.header('Access-Control-Allow-Origin', getOrigin(origin, corsOptions.origin))
-    if (corsOptions.credentials) {
+    const allowedOrigin = getOrigin(origin, corsOptions.origin, corsOptions.credentials)
+    c.header('Access-Control-Allow-Origin', allowedOrigin)
+    c.header('Vary', 'Origin')
+    if (corsOptions.credentials && allowedOrigin !== '*') {
       c.header('Access-Control-Allow-Credentials', 'true')
     }
 
@@ -54,9 +58,9 @@ export function corsMiddleware(options = {}) {
 /**
  * 获取允许的源
  */
-function getOrigin(requestOrigin, allowedOrigin) {
+function getOrigin(requestOrigin, allowedOrigin, allowCredentials = false) {
   if (allowedOrigin === '*') {
-    return '*'
+    return allowCredentials ? (requestOrigin || 'null') : '*'
   }
 
   if (Array.isArray(allowedOrigin)) {
@@ -103,8 +107,8 @@ export function securityHeadersMiddleware(options = {}) {
 export function cspMiddleware(policy = null) {
   const defaultPolicy = config.security?.csp || {
     'default-src': ["'self'"],
-    'script-src': ["'self'", "'unsafe-inline'"],
-    'style-src': ["'self'", "'unsafe-inline'"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'"],
     'img-src': ["'self'", "data:", "https:"],
     'font-src': ["'self'"],
     'connect-src': ["'self'"],

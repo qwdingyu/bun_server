@@ -63,7 +63,8 @@ class SimpleValidator {
     // 类型验证
     if (schema.type) {
       const actualType = this._getType(value)
-      if (actualType !== schema.type) {
+      const expectedType = schema.type === 'integer' ? 'number' : schema.type
+      if (actualType !== expectedType) {
         errors.push({
           field: path,
           message: `字段类型错误，期望 ${schema.type}，实际 ${actualType}`

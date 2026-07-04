@@ -1,5 +1,5 @@
 import BaseModel from './BaseModel.js'
-import { permissions, role_permissions, user_permissions } from '../models/schema/index.js'
+import { permissions, role_permissions, roles, user_permissions, user_roles } from '../models/schema/index.js'
 import { eq, and, isNull, or, sql, desc, asc } from 'drizzle-orm'
 import { getDrizzleInstance } from '../config/database.js'
 import AppError from '../utils/AppError.js'
@@ -106,15 +106,15 @@ class PermissionModel extends BaseModel {
         .from(permissions)
         .innerJoin(role_permissions, eq(role_permissions.permission_id, permissions.id))
         .innerJoin(
-          'user_roles',
+          user_roles,
           and(
-            eq('user_roles.role_id', role_permissions.role_id),
-            eq('user_roles.user_id', userId),
-            eq('user_roles.is_active', 1),
-            or(isNull('user_roles.expires_at'), sql`user_roles.expires_at > strftime('%s','now')`)
+            eq(user_roles.role_id, role_permissions.role_id),
+            eq(user_roles.user_id, userId),
+            eq(user_roles.is_active, 1),
+            or(isNull(user_roles.expires_at), sql`${user_roles.expires_at} > strftime('%s','now')`)
           )
         )
-        .innerJoin('roles', and(eq('roles.id', 'user_roles.role_id'), eq('roles.status', 'active')))
+        .innerJoin(roles, and(eq(roles.id, user_roles.role_id), eq(roles.status, 'active')))
         .where(and(eq(role_permissions.is_active, 1)))
 
       // 获取用户直接被授予的权限
@@ -172,11 +172,49 @@ class PermissionModel extends BaseModel {
    */
   async hasPermission(userId, permNames) {
     try {
-      const userPermissions = await this.getUserPermissions(userId)
       const permNamesArray = Array.isArray(permNames) ? permNames : [permNames]
+      const db = getDrizzleInstance()
 
-      // 检查是否有任一所需权限
-      return userPermissions.some((perm) => permNamesArray.includes(perm.name))
+      const directPermissions = await db
+        .select({ name: permissions.name, permission_type: user_permissions.permission_type })
+        .from(permissions)
+        .innerJoin(user_permissions, eq(user_permissions.permission_id, permissions.id))
+        .where(
+          and(
+            eq(user_permissions.user_id, userId),
+            eq(user_permissions.is_active, 1),
+            or(isNull(user_permissions.expires_at), sql`${user_permissions.expires_at} > strftime('%s','now')`)
+          )
+        )
+
+      const directMatches = directPermissions.filter((permission) => permNamesArray.includes(permission.name))
+
+      // 后台权限的安全默认规则：显式 deny 优先级最高，能覆盖用户直授 grant 与角色继承权限。
+      if (directMatches.some((permission) => permission.permission_type === 'deny')) {
+        return false
+      }
+
+      if (directMatches.some((permission) => permission.permission_type === 'grant')) {
+        return true
+      }
+
+      const rolePermissions = await db
+        .select({ name: permissions.name })
+        .from(permissions)
+        .innerJoin(role_permissions, eq(role_permissions.permission_id, permissions.id))
+        .innerJoin(
+          user_roles,
+          and(
+            eq(user_roles.role_id, role_permissions.role_id),
+            eq(user_roles.user_id, userId),
+            eq(user_roles.is_active, 1),
+            or(isNull(user_roles.expires_at), sql`${user_roles.expires_at} > strftime('%s','now')`)
+          )
+        )
+        .innerJoin(roles, and(eq(roles.id, user_roles.role_id), eq(roles.status, 'active')))
+        .where(and(eq(role_permissions.is_active, 1)))
+
+      return rolePermissions.some((permission) => permNamesArray.includes(permission.name))
     } catch (error) {
       console.error('检查用户权限失败:', error)
       throw error

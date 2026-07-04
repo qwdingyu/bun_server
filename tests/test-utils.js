@@ -15,6 +15,7 @@ const DB_PATH = path.join(__dirname, '..', 'data', 'app.db')
 
 // 测试数据库连接
 let testDb = null
+let dbInitialized = false
 
 /**
  * 初始化测试环境
@@ -29,8 +30,11 @@ export async function initTestEnv() {
   process.env.DATABASE_PATH = DB_PATH
 
   // 初始化数据库连接
-  await initDb()
-  console.log('✅ 数据库连接已初始化')
+  if (!dbInitialized) {
+    await initDb()
+    console.log('✅ 数据库连接已初始化')
+    dbInitialized = true
+  }
 
   return true
 }

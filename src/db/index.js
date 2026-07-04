@@ -48,24 +48,11 @@ async function initSqlite() {
 
     if (schemaPath) {
       const ddl = fs2.readFileSync(schemaPath, 'utf8')
-      const statements = ddl
-        .split(/;\s*\n/) // naive split on semicolon-newline
-        .map((s) => s.trim())
-        .filter((s) => s && !s.startsWith('--'))
-      let applied = 0
-      for (const stmt of statements) {
-        try {
-          sqlite.exec(stmt)
-          applied++
-        } catch (e) {
-          // Ignore benign errors on IF NOT EXISTS
-          if (!String(e?.message || '').includes('already exists')) {
-            console.warn('[DB] DDL failed:', stmt.slice(0, 120), e?.message || e)
-          }
-        }
-      }
+      // SQLite 可以一次执行多条 DDL；不要按分号手动拆分。
+      // 手动拆分会被行注释和块注释干扰，导致建表语句被跳过、索引先执行、残留 `*/` 被当成 SQL。
+      sqlite.exec(ddl)
       if (process.env.DB_LOG_DEBUG === 'true') {
-        console.log(`[DB] Applied SQLite schema from ${schemaPath}, statements=${applied}`)
+        console.log(`[DB] Applied SQLite schema from ${schemaPath}`)
       }
     } else {
       console.warn('[DB] Schema file not found. Tried:', candidates)

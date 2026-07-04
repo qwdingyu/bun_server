@@ -1,91 +1,32 @@
-import { verifyToken, extractBearerToken } from '../utils/jwt/index.js'
-import { userModel, roleModel, permissionModel } from '../models/index.js'
-import AppError from '../utils/AppError.js'
+import { roleModel, permissionModel } from '../models/index.js'
+import { getAuthProvider, attachAuthContext } from '../modules/auth/index.js'
+
+function authErrorResponse(c, status, code, message) {
+  return c.json(
+    {
+      success: false,
+      error: {
+        code,
+        message,
+        timestamp: new Date().toISOString()
+      }
+    },
+    status
+  )
+}
 
 /**
  * JWT 认证中间件
  */
 export async function authMiddleware(c, next) {
   try {
-    // 从请求头获取 Authorization
-    const authHeader = c.req.header('Authorization')
-    const token = extractBearerToken(authHeader)
+    const authResult = await getAuthProvider().authenticateRequest(c)
 
-    if (!token) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            code: 'MISSING_TOKEN',
-            message: '缺少认证令牌',
-            timestamp: new Date().toISOString()
-          }
-        },
-        401
-      )
+    if (!authResult.success) {
+      return authErrorResponse(c, authResult.status, authResult.error.code, authResult.error.message)
     }
 
-    // 验证 JWT token
-    const result = verifyToken(token)
-
-    if (!result.success) {
-      const errorCode = result.error.expired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN'
-      const message = result.error.expired ? '认证令牌已过期' : '认证令牌无效'
-
-      return c.json(
-        {
-          success: false,
-          error: {
-            code: errorCode,
-            message,
-            timestamp: new Date().toISOString()
-          }
-        },
-        401
-      )
-    }
-
-    // 从数据库获取最新的用户信息（可选，用于确保用户仍然有效）
-    try {
-      const user = await userModel.findById(result.payload.id, ['id', 'username', 'email', 'status'])
-
-      if (!user) {
-        return c.json(
-          {
-            success: false,
-            error: {
-              code: 'USER_NOT_FOUND',
-              message: '用户不存在',
-              timestamp: new Date().toISOString()
-            }
-          },
-          401
-        )
-      }
-
-      if (user.status !== 'active') {
-        return c.json(
-          {
-            success: false,
-            error: {
-              code: 'USER_INACTIVE',
-              message: '用户已被禁用',
-              timestamp: new Date().toISOString()
-            }
-          },
-          403
-        )
-      }
-
-      // 将用户信息添加到请求上下文
-      c.set('user', user)
-      c.set('tokenPayload', result.payload)
-    } catch (dbError) {
-      // 数据库查询失败，但token有效，使用token中的信息
-      console.warn('无法从数据库验证用户，使用token信息:', dbError.message)
-      c.set('user', result.payload)
-      c.set('tokenPayload', result.payload)
-    }
+    attachAuthContext(c, authResult.authContext, authResult.user, authResult.tokenPayload)
 
     await next()
   } catch (error) {
@@ -109,26 +50,10 @@ export async function authMiddleware(c, next) {
  */
 export async function optionalAuthMiddleware(c, next) {
   try {
-    const authHeader = c.req.header('Authorization')
-    const token = extractBearerToken(authHeader)
+    const authResult = await getAuthProvider().optionalAuthenticateRequest(c)
 
-    if (token) {
-      const result = verifyToken(token)
-
-      if (result.success) {
-        try {
-          const user = await userModel.findById(result.payload.id, ['id', 'username', 'email', 'status'])
-
-          if (user && user.status === 'active') {
-            c.set('user', user)
-            c.set('tokenPayload', result.payload)
-          }
-        } catch (dbError) {
-          // 数据库查询失败，但token有效
-          c.set('user', result.payload)
-          c.set('tokenPayload', result.payload)
-        }
-      }
+    if (authResult.success) {
+      attachAuthContext(c, authResult.authContext, authResult.user, authResult.tokenPayload)
     }
 
     await next()

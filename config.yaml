@@ -13,7 +13,8 @@ database:
 
 # 认证配置
 auth:
-  jwt_secret: your-super-secret-jwt-key-change-in-production-please
+  # 开发环境占位值；生产环境必须通过 JWT_SECRET 或安全的 auth.jwt_secret 覆盖。
+  jwt_secret: dev-only-change-me
   jwt_expires_in: 24h
   jwt_refresh_expires_in: 7d
   password_min_length: 6
@@ -21,7 +22,11 @@ auth:
 
 # CORS配置
 cors:
-  origin: '*'
+  origin:
+    - 'http://localhost:3000'
+    - 'http://localhost:5173'
+    - 'http://127.0.0.1:3000'
+    - 'http://127.0.0.1:5173'
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
   allowed_headers:
     - 'Content-Type'
@@ -29,7 +34,7 @@ cors:
     - 'X-Requested-With'
     - 'X-API-Key'
     - 'Accept'
-  credentials: true
+  credentials: false
   max_age: 86400
 
 # 安全配置
@@ -45,8 +50,8 @@ security:
   # 内容安全策略
   csp:
     default-src: ["'self'"]
-    script-src: ["'self'", "'unsafe-inline'"]
-    style-src: ["'self'", "'unsafe-inline'"]
+    script-src: ["'self'"]
+    style-src: ["'self'"]
     img-src: ["'self'", 'data:', 'https:']
     font-src: ["'self'"]
     connect-src: ["'self'"]

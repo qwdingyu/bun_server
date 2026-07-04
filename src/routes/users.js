@@ -166,29 +166,6 @@ userRoutes.post('/auth/logout', authMiddleware, userController.logout)
 // 获取当前用户信息 - 必须在 /:id 之前定义
 userRoutes.get('/me', authMiddleware, userController.getCurrentUser)
 
-// 根据ID获取用户详细信息（需要认证）
-userRoutes.get('/:id', authMiddleware, validateParams(schemas.id), userController.getUserById)
-
-// 获取用户列表 - 移到后面，避免拦截其他路由
-userRoutes.get('/', validateQuery(userListQuerySchema), userController.getUsers)
-
-// 更新用户信息（只能更新自己的或管理员权限）
-userRoutes.put('/:id', authMiddleware, validateParams(schemas.id), validateBody(updateUserSchema), requireOwnerOrAdmin('id'), userController.updateUser)
-
-// ====== 管理员权限路由 ======
-
-// 创建用户（管理员权限）
-userRoutes.post('/', authMiddleware, requireRoles('admin', 'super_admin'), validateBody(registerSchema), userController.createUser)
-
-// 删除用户（管理员权限）
-userRoutes.delete('/:id', authMiddleware, validateParams(schemas.id), adminMiddleware, userController.deleteUser)
-
-// 切换用户状态（管理员权限）
-userRoutes.post('/:id/toggle-status', authMiddleware, validateParams(schemas.id), adminMiddleware, userController.toggleStatus)
-
-// 验证用户邮箱（可以验证自己的或管理员权限）
-userRoutes.post('/:id/verify-email', authMiddleware, validateParams(schemas.id), requireOwnerOrAdmin('id'), userController.verifyEmail)
-
 // ====== 超级管理员权限路由 ======
 
 // 批量操作用户（超级管理员权限）
@@ -216,22 +193,7 @@ userRoutes.post(
     required: ['userIds', 'status'],
     additionalProperties: false
   }),
-  async (c) => {
-    // 这里可以添加批量更新用户状态的逻辑
-    const { userIds, status } = c.get('validatedBody')
-
-    return c.json(
-      {
-        success: false,
-        error: {
-          code: 'NOT_IMPLEMENTED',
-          message: '批量操作功能尚未实现',
-          timestamp: new Date().toISOString()
-        }
-      },
-      501
-    )
-  }
+  userController.batchUpdateStatus
 )
 
 // 批量删除用户（超级管理员权限）
@@ -255,23 +217,32 @@ userRoutes.delete(
     required: ['userIds'],
     additionalProperties: false
   }),
-  async (c) => {
-    // 这里可以添加批量删除用户的逻辑
-    const { userIds } = c.get('validatedBody')
-
-    return c.json(
-      {
-        success: false,
-        error: {
-          code: 'NOT_IMPLEMENTED',
-          message: '批量删除功能尚未实现',
-          timestamp: new Date().toISOString()
-        }
-      },
-      501
-    )
-  }
+  userController.batchDeleteUsers
 )
+
+
+// 根据ID获取用户详细信息（需要认证）
+userRoutes.get('/:id', authMiddleware, validateParams(schemas.id), userController.getUserById)
+
+// 获取用户列表 - 移到后面，避免拦截其他路由
+userRoutes.get('/', validateQuery(userListQuerySchema), userController.getUsers)
+
+// 更新用户信息（只能更新自己的或管理员权限）
+userRoutes.put('/:id', authMiddleware, validateParams(schemas.id), validateBody(updateUserSchema), requireOwnerOrAdmin('id'), userController.updateUser)
+
+// ====== 管理员权限路由 ======
+
+// 创建用户（管理员权限）
+userRoutes.post('/', authMiddleware, requireRoles('admin', 'super_admin'), validateBody(registerSchema), userController.createUser)
+
+// 删除用户（管理员权限）
+userRoutes.delete('/:id', authMiddleware, validateParams(schemas.id), adminMiddleware, userController.deleteUser)
+
+// 切换用户状态（管理员权限）
+userRoutes.post('/:id/toggle-status', authMiddleware, validateParams(schemas.id), adminMiddleware, userController.toggleStatus)
+
+// 验证用户邮箱（可以验证自己的或管理员权限）
+userRoutes.post('/:id/verify-email', authMiddleware, validateParams(schemas.id), requireOwnerOrAdmin('id'), userController.verifyEmail)
 
 // ====== 开发和调试路由（仅开发环境） ======
 

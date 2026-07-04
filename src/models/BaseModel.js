@@ -1,6 +1,7 @@
-import { eq, and, isNull, desc, asc, sql } from 'drizzle-orm'
+import { eq, and, isNull, desc, asc, sql, like } from 'drizzle-orm'
 import { getDrizzleInstance } from '../config/database.js'
 import schemaTables from './schema/index.js'
+import { getCurrentTimestamp, toTimestamp } from '../utils/datetime.js'
 
 const drizzleColumnsSymbol = Symbol.for('drizzle:Columns')
 
@@ -145,7 +146,6 @@ function createCompatDb() {
     }
   }
 }
-import { getCurrentTimestamp } from '../utils/datetime.js'
 
 export default class BaseModel {
   constructor(tableName, schema) {
@@ -214,16 +214,14 @@ export default class BaseModel {
       }
 
       const value = filter[key]
+      const column = this.schema[key]
 
       if (value === null) {
-        // 等价于 column IS NULL
-        conditions.push(isNull(this.schema[key]))
+        conditions.push(isNull(column))
       } else if (typeof value === 'string' && value.includes('%')) {
-        // LIKE 查询需要使用 sql 模板插入列对象
-        conditions.push(sql`${this.schema[key]} LIKE ${value}`)
+        conditions.push(like(column, value))
       } else {
-        // 默认使用等值匹配
-        conditions.push(eq(this.schema[key], value))
+        conditions.push(eq(column, value))
       }
     })
 
@@ -341,6 +339,14 @@ export default class BaseModel {
         processedData.updated_at = now
       }
 
+      // 确保其他时间字段也是时间戳格式
+      for (const key in processedData) {
+        // 对疑似时间字段进行标准化处理
+        if (key.endsWith('_at') && processedData[key] && typeof processedData[key] !== 'number') {
+          processedData[key] = toTimestamp(processedData[key])
+        }
+      }
+
       // 清除任何可能导致日期处理问题的空值
       Object.keys(processedData).forEach((key) => {
         if (processedData[key] === undefined) {
@@ -369,6 +375,14 @@ export default class BaseModel {
       // 在应用层处理更新时间，而不是依赖数据库触发器
       if (this.schema.updated_at && !processedData.updated_at) {
         processedData.updated_at = getCurrentTimestamp()
+      }
+
+      // 确保时间字段是时间戳格式
+      for (const key in processedData) {
+        // 对疑似时间字段进行标准化处理
+        if (key.endsWith('_at') && processedData[key] && typeof processedData[key] !== 'number') {
+          processedData[key] = toTimestamp(processedData[key])
+        }
       }
 
       // 清除任何可能导致日期处理问题的空值

@@ -1,6 +1,6 @@
 import BaseModel from './BaseModel.js'
 import { users } from '../models/schema/index.js'
-import { and, eq, isNull, or, sql, desc } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or, sql, desc } from 'drizzle-orm'
 import { getDrizzleInstance } from '../config/database.js'
 import { hashPassword, verifyPassword, validateEmail, validateUsername, sanitizeUser } from '../utils/auth.js'
 import { getCurrentTimestamp } from '../utils/datetime.js'
@@ -104,9 +104,15 @@ class UserModel extends BaseModel {
    */
   async authenticate(identifier, password) {
     try {
-      // 通过用户名或邮箱查找用户 - 需要包含password_hash用于验证
-      const authFields = [...this.safeFields, 'password_hash']
-      const user = await this.findOne(or(eq(this.schema.username, identifier), eq(this.schema.email, identifier)), authFields)
+      // 认证是安全关键路径，直接使用 Drizzle 条件查询，避免通用 BaseModel 误判表达式类型。
+      const db = getDrizzleInstance()
+      const selectedFields = this.getSelectFields([...this.safeFields, 'password_hash'])
+      const result = await db
+        .select(selectedFields)
+        .from(this.schema)
+        .where(or(eq(this.schema.username, identifier), eq(this.schema.email, identifier)))
+        .limit(1)
+      const user = result[0] || null
 
       if (!user) {
         throw new AppError('用户不存在', 404)
@@ -291,6 +297,60 @@ class UserModel extends BaseModel {
 
     await this.softDelete(id)
     return true
+  }
+
+  /**
+   * 批量更新用户状态。
+   * 后台批量操作是高风险能力：调用层必须先排除当前操作者，模型层只负责数据一致性。
+   */
+  async batchUpdateStatus(ids, status) {
+    const uniqueIds = [...new Set(ids.map(Number))]
+
+    if (!['active', 'inactive'].includes(status)) {
+      throw new AppError('用户状态不合法', 400, 'INVALID_USER_STATUS')
+    }
+
+    if (uniqueIds.length === 0) {
+      return { affected: 0, ids: [] }
+    }
+
+    const database = getDrizzleInstance()
+    const now = getCurrentTimestamp()
+    const result = await database
+      .update(this.schema)
+      .set({ status, updated_at: now })
+      .where(and(inArray(this.schema.id, uniqueIds), isNull(this.schema.deleted_at)))
+      .returning({ id: this.schema.id })
+
+    return {
+      affected: result.length,
+      ids: result.map((user) => user.id)
+    }
+  }
+
+  /**
+   * 批量软删除用户。
+   * 使用软删除保留审计和恢复空间，避免后台误操作直接造成不可逆数据丢失。
+   */
+  async batchSoftDeleteUsers(ids) {
+    const uniqueIds = [...new Set(ids.map(Number))]
+
+    if (uniqueIds.length === 0) {
+      return { affected: 0, ids: [] }
+    }
+
+    const database = getDrizzleInstance()
+    const now = getCurrentTimestamp()
+    const result = await database
+      .update(this.schema)
+      .set({ deleted_at: now, updated_at: now })
+      .where(and(inArray(this.schema.id, uniqueIds), isNull(this.schema.deleted_at)))
+      .returning({ id: this.schema.id })
+
+    return {
+      affected: result.length,
+      ids: result.map((user) => user.id)
+    }
   }
 
   /**

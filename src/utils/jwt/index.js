@@ -1,12 +1,49 @@
 import jwt from 'jsonwebtoken'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { loadConfig } from '../config.js'
 
 const config = loadConfig()
 
 // JWT 配置
-const JWT_SECRET = process.env.JWT_SECRET || config.auth?.jwt_secret || 'your-super-secret-jwt-key-change-in-production'
+const DEFAULT_JWT_SECRET = 'dev-only-change-me'
+const UNSAFE_JWT_SECRETS = new Set([
+  DEFAULT_JWT_SECRET,
+  'your-super-secret-jwt-key-change-in-production',
+  'your-super-secret-jwt-key-change-in-production-please'
+])
+const JWT_SECRET = process.env.JWT_SECRET || config.auth?.jwt_secret || DEFAULT_JWT_SECRET
 const JWT_EXPIRES_IN = config.auth?.jwt_expires_in || '24h'
 const JWT_REFRESH_EXPIRES_IN = config.auth?.jwt_refresh_expires_in || '7d'
+
+if (process.env.NODE_ENV === 'production' && UNSAFE_JWT_SECRETS.has(JWT_SECRET)) {
+  throw new Error('生产环境必须通过 JWT_SECRET 或 auth.jwt_secret 配置安全 JWT 密钥')
+}
+
+function parseDurationToSeconds(duration) {
+  if (typeof duration === 'number') {
+    return duration
+  }
+
+  const match = String(duration).trim().match(/^(\d+)([smhd])$/)
+  if (!match) {
+    return 7 * 24 * 60 * 60
+  }
+
+  const value = Number(match[1])
+  const unit = match[2]
+  const multipliers = {
+    s: 1,
+    m: 60,
+    h: 60 * 60,
+    d: 24 * 60 * 60
+  }
+
+  return value * multipliers[unit]
+}
+
+export function getRefreshTokenExpiresAt() {
+  return Math.floor(Date.now() / 1000) + parseDurationToSeconds(JWT_REFRESH_EXPIRES_IN)
+}
 
 /**
  * 生成 access token
@@ -81,15 +118,17 @@ export function generateTokenPair(user) {
     id: user.id,
     username: user.username,
     email: user.email,
-    role: user.role || 'user'
+    role: user.role || 'user',
+    jti: randomUUID()
   }
 
   const accessToken = generateToken(payload)
-  const refreshToken = generateRefreshToken({ id: user.id })
+  const refreshToken = generateRefreshToken({ id: user.id, token_use: 'refresh', jti: randomUUID() })
 
   return {
     accessToken,
     refreshToken,
+    refreshTokenExpiresAt: getRefreshTokenExpiresAt(),
     expiresIn: JWT_EXPIRES_IN,
     tokenType: 'Bearer'
   }
@@ -149,17 +188,9 @@ export function generateSecureSecret(length = 64) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*'
   let result = ''
 
-  if (typeof crypto !== 'undefined' && crypto.randomBytes) {
-    // Node.js/Bun 环境
-    const bytes = crypto.randomBytes(length)
-    for (let i = 0; i < length; i++) {
-      result += chars[bytes[i] % chars.length]
-    }
-  } else {
-    // 浏览器环境fallback
-    for (let i = 0; i < length; i++) {
-      result += chars[Math.floor(Math.random() * chars.length)]
-    }
+  const bytes = randomBytes(length)
+  for (let i = 0; i < length; i++) {
+    result += chars[bytes[i] % chars.length]
   }
 
   return result
@@ -171,6 +202,7 @@ export default {
   verifyToken,
   decodeToken,
   generateTokenPair,
+  getRefreshTokenExpiresAt,
   refreshTokenPair,
   extractBearerToken,
   isTokenNearExpiry,

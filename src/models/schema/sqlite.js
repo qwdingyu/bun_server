@@ -91,6 +91,23 @@ export const user_permissions = sqliteTable('user_permissions', {
   is_active: integer('is_active').default(1)
 })
 
+export const user_sessions = sqliteTable('user_sessions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  user_id: integer('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  token_hash: text('token_hash').notNull().unique(),
+  refresh_token_hash: text('refresh_token_hash').unique(),
+  device_info: text('device_info'),
+  user_agent: text('user_agent'),
+  ip_address: text('ip_address'),
+  location: text('location'),
+  is_active: integer('is_active').default(1),
+  expires_at: integer('expires_at').notNull(),
+  last_used_at: integer('last_used_at').default(sql`strftime('%s','now')`),
+  created_at: integer('created_at').default(sql`strftime('%s','now')`)
+})
+
 export async function ensureIndexes(db) {
   const indexSql = [
     // users
@@ -123,7 +140,12 @@ export async function ensureIndexes(db) {
     'CREATE INDEX IF NOT EXISTS idx_user_permissions_permission_id ON user_permissions(permission_id)',
     'CREATE INDEX IF NOT EXISTS idx_user_permissions_permission_type ON user_permissions(permission_type)',
     'CREATE INDEX IF NOT EXISTS idx_user_permissions_is_active ON user_permissions(is_active)',
-    'CREATE INDEX IF NOT EXISTS idx_user_permissions_expires_at ON user_permissions(expires_at)'
+    'CREATE INDEX IF NOT EXISTS idx_user_permissions_expires_at ON user_permissions(expires_at)',
+    // user_sessions
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash)',
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_token_hash ON user_sessions(refresh_token_hash)',
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)'
   ]
 
   for (const sqlText of indexSql) {
@@ -142,7 +164,8 @@ export const schema = {
   permissions,
   user_roles,
   role_permissions,
-  user_permissions
+  user_permissions,
+  user_sessions
 }
 
 export default schema
