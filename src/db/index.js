@@ -3,6 +3,7 @@
 
 const DB_TYPE = (process.env.DATABASE_TYPE || 'sqlite').toLowerCase()
 import { resolveProjectPath } from '../utils/paths.js'
+import { seedSqliteDefaults } from './seed.js'
 
 let db = null
 let driver = null // underlying driver/pool for cleanup
@@ -61,6 +62,13 @@ async function initSqlite() {
     const check = sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get()
     if (!check) {
       console.warn('[DB] Core table users missing after schema application')
+    }
+
+    if (process.env.DB_SEED_DEFAULTS !== 'false') {
+      seedSqliteDefaults(sqlite)
+      if (process.env.DB_LOG_DEBUG === 'true') {
+        console.log('[DB] Applied default SQLite seed data')
+      }
     }
   } catch (e) {
     console.warn('[DB] SQLite schema application skipped:', e?.message || e)

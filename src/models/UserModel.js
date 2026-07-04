@@ -141,7 +141,7 @@ class UserModel extends BaseModel {
    * 根据用户名查找用户
    */
   async findByUsername(username) {
-    const user = await this.findOne({ username })
+    const user = await this.findOne({ username, deleted_at: null })
     return user ? sanitizeUser(user) : null
   }
 
@@ -149,7 +149,7 @@ class UserModel extends BaseModel {
    * 根据邮箱查找用户
    */
   async findByEmail(email) {
-    const user = await this.findOne({ email })
+    const user = await this.findOne({ email, deleted_at: null })
     return user ? sanitizeUser(user) : null
   }
 

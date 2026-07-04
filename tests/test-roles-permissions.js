@@ -5,6 +5,9 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { roleModel, permissionModel } from '../src/models/index.js'
+import { role_permissions } from '../src/models/schema/index.js'
+import { getDrizzleInstance } from '../src/config/database.js'
+import { and, eq } from 'drizzle-orm'
 import { initTestEnv, cleanupTestData } from './test-utils.js'
 
 // 获取当前文件的目录
@@ -286,18 +289,15 @@ await testRunner.test('权限继承', async () => {
 
   // 现在我们将这个角色分配给用户，然后检查用户是否继承了这些权限
   // 这部分在test-users.js中已经测试过，这里我们只检查分配是否成功
+  const db = getDrizzleInstance()
   for (const perm of permissions) {
-    const rolePermission = await permissionModel.db
+    const rolePermission = await db
       .select()
-      .from('role_permissions')
-      .where({
-        role_id: role.id,
-        permission_id: perm.id,
-        is_active: 1
-      })
-      .first()
+      .from(role_permissions)
+      .where(and(eq(role_permissions.role_id, role.id), eq(role_permissions.permission_id, perm.id), eq(role_permissions.is_active, 1)))
+      .limit(1)
 
-    testRunner.assert(rolePermission, `角色应该有权限 ${perm.name}`)
+    testRunner.assert(rolePermission.length > 0, `角色应该有权限 ${perm.name}`)
   }
 })
 
@@ -319,3 +319,7 @@ testRunner.printSummary()
 
 // 清理测试数据
 await cleanupTestData()
+
+if (testRunner.failed > 0) {
+  process.exit(1)
+}

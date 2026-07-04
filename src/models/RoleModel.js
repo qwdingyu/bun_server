@@ -161,11 +161,11 @@ class RoleModel extends BaseModel {
 
       const db = getDrizzleInstance()
 
-      // 检查用户是否已有此角色
+      // 检查用户是否已有此角色。即使旧记录已被停用，也要复用同一行，避免唯一约束冲突。
       const existingUserRole = await db
         .select()
         .from(user_roles)
-        .where(and(eq(user_roles.user_id, userId), eq(user_roles.role_id, roleId), eq(user_roles.is_active, 1)))
+        .where(and(eq(user_roles.user_id, userId), eq(user_roles.role_id, roleId)))
         .limit(1)
 
       if (existingUserRole.length > 0) {
