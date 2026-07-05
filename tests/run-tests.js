@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // 所有测试脚本，按执行顺序排列
-const testScripts = ['init-db.js', 'test-auth-provider.js', 'test-session-model.js', 'test-auth-session-flow.js', 'test-rbac-priority.js', 'test-user-batch-routes.js', 'test-user-permissions-menu-audit.js', 'test-mysql-schema.js', 'test-mysql-init-plan.js', 'test-config.js', 'test-roles-permissions.js', 'test-users.js', 'test-api.js']
+const testScripts = ['init-db.js', 'test-app-bootstrap.js', 'test-auth-provider.js', 'test-session-model.js', 'test-auth-session-flow.js', 'test-rbac-priority.js', 'test-user-batch-routes.js', 'test-user-permissions-menu-audit.js', 'test-mysql-schema.js', 'test-mysql-init-plan.js', 'test-config.js', 'test-roles-permissions.js', 'test-users.js', 'test-api.js']
 
 // 控制台颜色
 const colors = {
