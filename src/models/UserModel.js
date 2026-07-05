@@ -217,10 +217,13 @@ class UserModel extends BaseModel {
       } else {
         // 普通查询
         total = await this.count(queryFilter)
-        users = await this.findMany(queryFilter, 'created_at', 'desc', this.safeFields)
-
-        // 应用分页
-        users = users.slice(offset, offset + limit)
+        users = await this.findPage(queryFilter, {
+          page,
+          limit,
+          orderBy: 'created_at',
+          order: 'desc',
+          fields: this.safeFields
+        })
       }
 
       return {
@@ -244,19 +247,28 @@ class UserModel extends BaseModel {
    */
   async getUserStats() {
     try {
-      const allUsers = await this.findMany({ deleted_at: null })
-
       // 获取今天开始时的时间戳
       const startOfToday = new Date()
       startOfToday.setHours(0, 0, 0, 0)
       const todayTimestamp = Math.floor(startOfToday.getTime() / 1000)
+      const database = getDrizzleInstance()
+      const [stats] = await database
+        .select({
+          total: sql`count(*)`.mapWith(Number),
+          active: sql`sum(case when ${this.schema.status} = 'active' then 1 else 0 end)`.mapWith(Number),
+          inactive: sql`sum(case when ${this.schema.status} = 'inactive' then 1 else 0 end)`.mapWith(Number),
+          verified: sql`sum(case when ${this.schema.email_verified} = 1 then 1 else 0 end)`.mapWith(Number),
+          created_today: sql`sum(case when ${this.schema.created_at} >= ${todayTimestamp} then 1 else 0 end)`.mapWith(Number)
+        })
+        .from(this.schema)
+        .where(isNull(this.schema.deleted_at))
 
       return {
-        total: allUsers.length,
-        active: allUsers.filter((u) => u.status === 'active').length,
-        inactive: allUsers.filter((u) => u.status === 'inactive').length,
-        verified: allUsers.filter((u) => u.email_verified).length,
-        created_today: allUsers.filter((u) => u.created_at >= todayTimestamp).length
+        total: stats?.total || 0,
+        active: stats?.active || 0,
+        inactive: stats?.inactive || 0,
+        verified: stats?.verified || 0,
+        created_today: stats?.created_today || 0
       }
     } catch (error) {
       console.error('获取用户统计失败:', error)

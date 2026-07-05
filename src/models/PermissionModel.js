@@ -433,10 +433,15 @@ class PermissionModel extends BaseModel {
       } else {
         // 普通查询
         total = await this.count(queryFilter)
-        permissions = await this.findMany(queryFilter, 'resource', 'asc', this.safeFields)
-
-        // 应用分页
-        permissions = permissions.slice(offset, offset + limit)
+        permissions = await this.findPage(queryFilter, {
+          page,
+          limit,
+          orderBy: 'resource',
+          order: 'asc',
+          secondaryOrderBy: 'action',
+          secondaryOrder: 'asc',
+          fields: this.safeFields
+        })
       }
 
       return {

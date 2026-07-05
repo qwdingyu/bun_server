@@ -280,6 +280,52 @@ export default class BaseModel {
   }
 
   /**
+   * 分页查找多条记录。
+   * 后台列表必须把分页下推到数据库，避免数据量增长后先查全量再内存切片。
+   */
+  async findPage(filter = {}, options = {}) {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        orderBy = 'id',
+        order = 'asc',
+        fields = null,
+        where = null,
+        secondaryOrderBy = null,
+        secondaryOrder = 'asc'
+      } = options
+      const offset = (page - 1) * limit
+      const db = getDrizzleInstance()
+      const selectedFields = this.getSelectFields(fields)
+      const whereClause = where || this.buildWhereClause(filter)
+
+      let query = db.select(selectedFields).from(this.schema)
+
+      if (whereClause) {
+        query = query.where(whereClause)
+      }
+
+      if (orderBy && this.safeOrderFields.includes(orderBy)) {
+        const orderFn = order === 'asc' ? asc : desc
+        const orderExpressions = [orderFn(this.schema[orderBy])]
+
+        if (secondaryOrderBy && this.safeOrderFields.includes(secondaryOrderBy)) {
+          const secondaryOrderFn = secondaryOrder === 'asc' ? asc : desc
+          orderExpressions.push(secondaryOrderFn(this.schema[secondaryOrderBy]))
+        }
+
+        query = query.orderBy(...orderExpressions)
+      }
+
+      return await query.limit(limit).offset(offset)
+    } catch (error) {
+      console.error(`Error in ${this.tableName}.findPage:`, error)
+      throw error
+    }
+  }
+
+  /**
    * 查找单条记录
    */
   async findOne(filter = {}, fields = null) {

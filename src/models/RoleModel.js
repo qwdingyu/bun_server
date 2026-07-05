@@ -1,6 +1,6 @@
 import BaseModel from './BaseModel.js'
 import { roles, user_roles } from '../models/schema/index.js'
-import { eq, and, isNull, or, sql, desc, asc } from 'drizzle-orm'
+import { eq, and, isNull, or, sql, desc, asc, inArray } from 'drizzle-orm'
 import { getDrizzleInstance } from '../config/database.js'
 import { getCurrentTimestamp } from '../utils/datetime.js'
 import AppError from '../utils/AppError.js'
@@ -138,7 +138,7 @@ class RoleModel extends BaseModel {
             or(isNull(user_roles.expires_at), sql`${user_roles.expires_at} > ${getCurrentTimestamp()}`)
           )
         )
-        .where(and(eq(roles.status, 'active'), sql`${roles.name} IN (${roleNamesArray})`))
+        .where(and(eq(roles.status, 'active'), inArray(roles.name, roleNamesArray)))
 
       const result = await query
       return result[0]?.count > 0
@@ -272,10 +272,15 @@ class RoleModel extends BaseModel {
       } else {
         // 普通查询
         total = await this.count(queryFilter)
-        roles = await this.findMany(queryFilter, 'level', 'desc', this.safeFields)
-
-        // 应用分页
-        roles = roles.slice(offset, offset + limit)
+        roles = await this.findPage(queryFilter, {
+          page,
+          limit,
+          orderBy: 'level',
+          order: 'desc',
+          secondaryOrderBy: 'name',
+          secondaryOrder: 'asc',
+          fields: this.safeFields
+        })
       }
 
       return {
