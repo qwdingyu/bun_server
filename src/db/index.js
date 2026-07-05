@@ -3,7 +3,8 @@
 
 const DB_TYPE = (process.env.DATABASE_TYPE || 'sqlite').toLowerCase()
 import { resolveProjectPath } from '../utils/paths.js'
-import { seedSqliteDefaults } from './seed.js'
+import { seedMysqlDefaults, seedSqliteDefaults } from './seed.js'
+import { applyMysqlSchema } from './mysql-schema.js'
 
 let db = null
 let driver = null // underlying driver/pool for cleanup
@@ -99,6 +100,21 @@ async function initMySQL() {
   }
 
   const enableSqlLog = process.env.DB_LOG_DEBUG === 'true' || process.env.NODE_ENV === 'development'
+
+  if (process.env.DB_AUTO_MIGRATE !== 'false') {
+    await applyMysqlSchema(pool)
+    if (process.env.DB_LOG_DEBUG === 'true') {
+      console.log('[DB] Applied MySQL schema')
+    }
+  }
+
+  if (process.env.DB_SEED_DEFAULTS !== 'false') {
+    await seedMysqlDefaults(pool)
+    if (process.env.DB_LOG_DEBUG === 'true') {
+      console.log('[DB] Applied default MySQL seed data')
+    }
+  }
+
   driver = pool
   db = drizzle(pool, {
     logger: enableSqlLog

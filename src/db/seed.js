@@ -109,6 +109,15 @@ function all(sqlite, sql, params = []) {
   return sqlite.query(sql).all(...params)
 }
 
+async function mysqlQuery(pool, sql, params = []) {
+  const [rows] = await pool.query(sql, params)
+  return rows
+}
+
+async function mysqlExecute(pool, sql, params = []) {
+  await pool.execute(sql, params)
+}
+
 export function seedSqliteDefaults(sqlite, options = {}) {
   const { includeAdmin = true } = options
   const now = Math.floor(Date.now() / 1000)
@@ -244,5 +253,158 @@ export function getSeedSummary(sqlite) {
     role_permissions: get(sqlite, 'SELECT COUNT(*) as count FROM role_permissions')?.count || 0,
     user_roles: get(sqlite, 'SELECT COUNT(*) as count FROM user_roles')?.count || 0,
     configs: get(sqlite, 'SELECT COUNT(*) as count FROM system_config')?.count || 0
+  }
+}
+
+export async function seedMysqlDefaults(pool, options = {}) {
+  const { includeAdmin = true } = options
+  const now = Math.floor(Date.now() / 1000)
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+
+    for (const role of DEFAULT_ROLES) {
+      await mysqlExecute(
+        connection,
+        `
+          INSERT INTO roles (name, display_name, description, level, is_system, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 1, 'active', ?, ?)
+          ON DUPLICATE KEY UPDATE
+            display_name = VALUES(display_name),
+            description = VALUES(description),
+            level = VALUES(level),
+            is_system = 1,
+            status = 'active',
+            updated_at = VALUES(updated_at)
+        `,
+        [role.name, role.display_name, role.description, role.level, now, now]
+      )
+    }
+
+    for (const permission of DEFAULT_PERMISSIONS) {
+      await mysqlExecute(
+        connection,
+        `
+          INSERT INTO permissions (name, display_name, description, resource, action, is_system, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            display_name = VALUES(display_name),
+            description = VALUES(description),
+            resource = VALUES(resource),
+            action = VALUES(action),
+            is_system = 1,
+            updated_at = VALUES(updated_at)
+        `,
+        [permission.name, permission.display_name, permission.description, permission.resource, permission.action, now, now]
+      )
+    }
+
+    const roleRows = await mysqlQuery(connection, 'SELECT id, name FROM roles')
+    const permissionRows = await mysqlQuery(connection, 'SELECT id, name FROM permissions')
+    const roleIdByName = new Map(roleRows.map((role) => [role.name, role.id]))
+    const permissionIdByName = new Map(permissionRows.map((permission) => [permission.name, permission.id]))
+
+    for (const [roleName, permissionNames] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+      const roleId = roleIdByName.get(roleName)
+      if (!roleId) continue
+
+      const names = permissionNames === '*' ? [...permissionIdByName.keys()] : permissionNames
+      for (const permissionName of names) {
+        const permissionId = permissionIdByName.get(permissionName)
+        if (!permissionId) continue
+
+        await mysqlExecute(
+          connection,
+          `
+            INSERT INTO role_permissions (role_id, permission_id, is_active, granted_at)
+            VALUES (?, ?, 1, ?)
+            ON DUPLICATE KEY UPDATE
+              is_active = 1,
+              granted_at = VALUES(granted_at)
+          `,
+          [roleId, permissionId, now]
+        )
+      }
+    }
+
+    if (includeAdmin) {
+      await mysqlExecute(
+        connection,
+        `
+          INSERT INTO users (username, email, password_hash, first_name, last_name, status, email_verified, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'active', 1, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            email = VALUES(email),
+            first_name = VALUES(first_name),
+            last_name = VALUES(last_name),
+            status = 'active',
+            email_verified = 1,
+            updated_at = VALUES(updated_at)
+        `,
+        [
+          DEFAULT_ADMIN_USER.username,
+          DEFAULT_ADMIN_USER.email,
+          hashPassword(DEFAULT_ADMIN_USER.password),
+          DEFAULT_ADMIN_USER.first_name,
+          DEFAULT_ADMIN_USER.last_name,
+          now,
+          now
+        ]
+      )
+
+      const [adminUser] = await mysqlQuery(connection, 'SELECT id FROM users WHERE username = ?', [DEFAULT_ADMIN_USER.username])
+      const adminRoleId = roleIdByName.get(DEFAULT_ADMIN_USER.role)
+      if (adminUser && adminRoleId) {
+        await mysqlExecute(
+          connection,
+          `
+            INSERT INTO user_roles (user_id, role_id, is_active, assigned_at)
+            VALUES (?, ?, 1, ?)
+            ON DUPLICATE KEY UPDATE
+              is_active = 1,
+              assigned_at = VALUES(assigned_at)
+          `,
+          [adminUser.id, adminRoleId, now]
+        )
+      }
+    }
+
+    for (const config of DEFAULT_SYSTEM_CONFIGS) {
+      await mysqlExecute(
+        connection,
+        `
+          INSERT INTO system_config (config_key, config_value, updated_at)
+          VALUES (?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            config_value = VALUES(config_value),
+            updated_at = VALUES(updated_at)
+        `,
+        [config.config_key, config.config_value, now]
+      )
+    }
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
+export async function getMysqlSeedSummary(pool) {
+  const count = async (tableName) => {
+    const [row] = await mysqlQuery(pool, `SELECT COUNT(*) as count FROM ${tableName}`)
+    return row?.count || 0
+  }
+
+  return {
+    users: await count('users'),
+    roles: await count('roles'),
+    permissions: await count('permissions'),
+    role_permissions: await count('role_permissions'),
+    user_roles: await count('user_roles'),
+    configs: await count('system_config')
   }
 }
