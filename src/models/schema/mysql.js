@@ -108,6 +108,21 @@ export const user_sessions = mysqlTable('user_sessions', {
   created_at: bigint('created_at', { mode: 'number' }).default(sql`(UNIX_TIMESTAMP())`)
 })
 
+export const audit_logs = mysqlTable('audit_logs', {
+  id: int('id').autoincrement().primaryKey(),
+  user_id: int('user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: varchar('action', { length: 100 }).notNull(),
+  resource_type: varchar('resource_type', { length: 100 }).notNull(),
+  resource_id: varchar('resource_id', { length: 100 }),
+  old_values: text('old_values'),
+  new_values: text('new_values'),
+  ip_address: varchar('ip_address', { length: 100 }),
+  user_agent: text('user_agent'),
+  status: varchar('status', { length: 20 }).default('success'),
+  error_message: text('error_message'),
+  created_at: bigint('created_at', { mode: 'number' }).default(sql`(UNIX_TIMESTAMP())`)
+})
+
 export async function ensureIndexes(db) {
   const indexSql = [
     'CREATE INDEX idx_users_status ON users(status)',
@@ -130,7 +145,10 @@ export async function ensureIndexes(db) {
     'CREATE INDEX idx_user_permissions_is_active ON user_permissions(is_active)',
     'CREATE INDEX idx_user_permissions_expires_at ON user_permissions(expires_at)',
     'CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id)',
-    'CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at)'
+    'CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at)',
+    'CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id)',
+    'CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at)',
+    'CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id)'
   ]
 
   for (const sqlText of indexSql) {
@@ -150,7 +168,8 @@ export const schema = {
   user_roles,
   role_permissions,
   user_permissions,
-  user_sessions
+  user_sessions,
+  audit_logs
 }
 
 export default schema

@@ -1,9 +1,28 @@
-import { sessionModel, userModel } from '../models/index.js'
+import { auditLogModel, permissionModel, sessionModel, userModel } from '../models/index.js'
 import { generateTokenPair, verifyToken } from '../utils/jwt/index.js'
 import { asyncHandler } from '../middleware/error/index.js'
 import { validateBody, validateQuery, validateParams, patterns, schemas } from '../middleware/validation/index.js'
 import AppError from '../utils/AppError.js'
 import * as logger from '../utils/logger/index.js'
+import { buildUserMenuTree } from '../modules/rbac/menu.js'
+
+function getRequestMeta(c) {
+  return {
+    ipAddress: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown',
+    userAgent: c.req.header('user-agent') || 'unknown'
+  }
+}
+
+async function recordAudit(c, entry) {
+  const user = c.get('user')
+  const meta = getRequestMeta(c)
+  await auditLogModel.record({
+    userId: entry.userId === undefined ? user?.id : entry.userId,
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    ...entry
+  })
+}
 
 class UserController {
   /**
@@ -206,6 +225,13 @@ class UserController {
         updated_fields: Object.keys(body)
       })
 
+      await recordAudit(c, {
+        action: 'users.update',
+        resourceType: 'users',
+        resourceId: id,
+        newValues: { updated_fields: Object.keys(body) }
+      })
+
       return c.json({
         success: true,
         message: '用户更新成功',
@@ -261,6 +287,12 @@ class UserController {
       logger.warn('用户被删除', {
         user_id: id,
         deleted_by: currentUser?.id
+      })
+
+      await recordAudit(c, {
+        action: 'users.delete',
+        resourceType: 'users',
+        resourceId: id
       })
 
       return c.json({
@@ -319,6 +351,13 @@ class UserController {
         user_id: id,
         new_status: user.status,
         changed_by: currentUser?.id
+      })
+
+      await recordAudit(c, {
+        action: 'users.toggle_status',
+        resourceType: 'users',
+        resourceId: id,
+        newValues: { status: user.status }
       })
 
       return c.json({
@@ -773,6 +812,13 @@ class UserController {
         changed_by: currentUser?.id
       })
 
+      await recordAudit(c, {
+        action: 'users.batch_update_status',
+        resourceType: 'users',
+        resourceId: result.ids.join(','),
+        newValues: { requested_ids: userIds, affected_ids: result.ids, status }
+      })
+
       return c.json({
         success: true,
         message: '批量更新用户状态成功',
@@ -818,6 +864,13 @@ class UserController {
         deleted_by: currentUser?.id
       })
 
+      await recordAudit(c, {
+        action: 'users.batch_delete',
+        resourceType: 'users',
+        resourceId: result.ids.join(','),
+        newValues: { requested_ids: userIds, affected_ids: result.ids }
+      })
+
       return c.json({
         success: true,
         message: '批量删除用户成功',
@@ -830,6 +883,81 @@ class UserController {
     } catch (error) {
       if (!(error instanceof AppError)) {
         logger.error('批量删除用户失败', error)
+      }
+      throw error
+    }
+  })
+
+  /**
+   * 获取当前用户有效权限
+   */
+  getCurrentUserPermissions = asyncHandler(async (c) => {
+    const startTime = Date.now()
+
+    try {
+      const user = c.get('user')
+      if (!user) {
+        throw new AppError('用户未认证', 401, 'UNAUTHENTICATED')
+      }
+
+      const permissions = await permissionModel.getUserPermissions(user.id)
+      const permissionNames = permissions.map((permission) => permission.name)
+      const duration = Date.now() - startTime
+
+      logger.performance('getCurrentUserPermissions', duration, { user_id: user.id })
+
+      return c.json({
+        success: true,
+        data: {
+          permissions,
+          permissionNames
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+          duration: `${duration}ms`
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof AppError)) {
+        logger.error('获取当前用户权限失败', error)
+      }
+      throw error
+    }
+  })
+
+  /**
+   * 获取当前用户菜单和按钮权限
+   */
+  getCurrentUserMenus = asyncHandler(async (c) => {
+    const startTime = Date.now()
+
+    try {
+      const user = c.get('user')
+      if (!user) {
+        throw new AppError('用户未认证', 401, 'UNAUTHENTICATED')
+      }
+
+      const permissions = await permissionModel.getUserPermissions(user.id)
+      const permissionNames = permissions.map((permission) => permission.name)
+      const menus = buildUserMenuTree(permissionNames)
+      const duration = Date.now() - startTime
+
+      logger.performance('getCurrentUserMenus', duration, { user_id: user.id })
+
+      return c.json({
+        success: true,
+        data: {
+          menus,
+          permissionNames
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+          duration: `${duration}ms`
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof AppError)) {
+        logger.error('获取当前用户菜单失败', error)
       }
       throw error
     }

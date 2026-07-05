@@ -108,6 +108,21 @@ export const user_sessions = sqliteTable('user_sessions', {
   created_at: integer('created_at').default(sql`strftime('%s','now')`)
 })
 
+export const audit_logs = sqliteTable('audit_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  user_id: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: text('action').notNull(),
+  resource_type: text('resource_type').notNull(),
+  resource_id: text('resource_id'),
+  old_values: text('old_values'),
+  new_values: text('new_values'),
+  ip_address: text('ip_address'),
+  user_agent: text('user_agent'),
+  status: text('status').default('success'),
+  error_message: text('error_message'),
+  created_at: integer('created_at').default(sql`strftime('%s','now')`)
+})
+
 export async function ensureIndexes(db) {
   const indexSql = [
     // users
@@ -145,7 +160,11 @@ export async function ensureIndexes(db) {
     'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash)',
     'CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_token_hash ON user_sessions(refresh_token_hash)',
-    'CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)'
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)',
+    // audit_logs
+    'CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id)'
   ]
 
   for (const sqlText of indexSql) {
@@ -165,7 +184,8 @@ export const schema = {
   user_roles,
   role_permissions,
   user_permissions,
-  user_sessions
+  user_sessions,
+  audit_logs
 }
 
 export default schema

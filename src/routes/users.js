@@ -166,6 +166,10 @@ userRoutes.post('/auth/logout', authMiddleware, userController.logout)
 // 获取当前用户信息 - 必须在 /:id 之前定义
 userRoutes.get('/me', authMiddleware, userController.getCurrentUser)
 
+// 获取当前用户有效权限与菜单按钮，用于后台前端初始化门禁
+userRoutes.get('/me/permissions', authMiddleware, userController.getCurrentUserPermissions)
+userRoutes.get('/me/menus', authMiddleware, userController.getCurrentUserMenus)
+
 // ====== 超级管理员权限路由 ======
 
 // 批量操作用户（超级管理员权限）

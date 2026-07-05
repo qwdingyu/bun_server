@@ -18,7 +18,8 @@ await testRunner.test('MySQL schema 导出后台核心表', async () => {
     'user_roles',
     'role_permissions',
     'user_permissions',
-    'user_sessions'
+    'user_sessions',
+    'audit_logs'
   ]
 
   for (const tableName of requiredTables) {
@@ -34,6 +35,8 @@ await testRunner.test('MySQL RBAC 表包含关键列', async () => {
   testRunner.assert(mysqlSchema.role_permissions.permission_id, 'role_permissions 应包含 permission_id')
   testRunner.assert(mysqlSchema.user_permissions.permission_type, 'user_permissions 应包含 permission_type')
   testRunner.assert(mysqlSchema.user_sessions.refresh_token_hash, 'user_sessions 应包含 refresh_token_hash')
+  testRunner.assert(mysqlSchema.audit_logs.action, 'audit_logs 应包含 action')
+  testRunner.assert(mysqlSchema.audit_logs.resource_type, 'audit_logs 应包含 resource_type')
 })
 
 testRunner.printSummary()

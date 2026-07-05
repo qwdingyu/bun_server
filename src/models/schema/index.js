@@ -17,6 +17,7 @@ export const {
   role_permissions,
   user_permissions,
   user_sessions,
+  audit_logs,
   ensureIndexes,
   schema
 } = schemaModule
