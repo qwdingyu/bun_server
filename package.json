@@ -1,7 +1,7 @@
 {
   "name": "bun-server-framework",
   "version": "1.0.0",
-  "description": "A modern web framework based on Bun.js + Hono + Drizzle ORM",
+  "description": "A lightweight reusable backend admin scaffold based on Bun + Hono + Drizzle",
   "type": "module",
   "scripts": {
     "dev": "bun run --hot src/main.js",
@@ -11,6 +11,7 @@
     "build:macos": "bun build --compile --target macos --minify --outfile dist/server-macos src/main.js",
     "build:windows": "bun build --compile --target=bun-windows-x64 --minify --outfile=dist/server.exe src/main.js",
     "test": "bun test",
+    "test:all": "bun run tests/run-tests.js",
     "test:mysql": "bun run tests/test-mysql-integration.js",
     "db:init": "bun run scripts/init-db.mjs",
     "db:reset": "bun run scripts/reset-db.mjs",
