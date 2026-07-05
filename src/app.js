@@ -9,6 +9,7 @@ import { optionalAuthMiddleware } from './middleware/auth.js'
 // 导入路由模块
 import userRoutes from './routes/users.js'
 import healthRoutes from './routes/health.js'
+import rbacRoutes from './routes/rbac.js'
 
 // 导入日志系统
 import * as logger from './utils/logger/index.js'
@@ -316,6 +317,7 @@ export function createApp(options = {}) {
   // 挂载路由
   const apiPrefix = config.api?.prefix || '/api'
   app.route(`${apiPrefix}/users`, userRoutes)
+  app.route(`${apiPrefix}/rbac`, rbacRoutes)
   app.route(`${apiPrefix}/health`, healthRoutes)
 
   // 根路径
