@@ -3,6 +3,9 @@
  * 该脚本测试系统配置相关功能，包括配置的CRUD操作
  */
 import { systemConfigModel } from '../src/models/index.js'
+import { getDrizzleInstance } from '../src/config/database.js'
+import { system_config } from '../src/models/schema/index.js'
+import { eq } from 'drizzle-orm'
 import { initTestEnv, testRunner, cleanupTestData } from './test-utils.js'
 
 // 初始化测试环境
@@ -174,8 +177,8 @@ await testRunner.test('刷新配置缓存', async () => {
   // 读取到缓存中
   await systemConfigModel.getConfig(key)
 
-  // 直接修改数据库中的值（绕过模型方法）
-  await systemConfigModel.db.update(systemConfigModel.schema).set({ config_value: newValue }).where({ config_key: key })
+  // 直接通过 Drizzle 修改数据库中的值（绕过模型方法），用于验证 refreshCache 是否真的重新加载底层数据。
+  await getDrizzleInstance().update(system_config).set({ config_value: newValue }).where(eq(system_config.config_key, key))
 
   // 不刷新缓存的情况下读取（应该返回旧值）
   const cachedValue = await systemConfigModel.getConfig(key)
@@ -194,3 +197,8 @@ testRunner.printSummary()
 
 // 清理测试数据
 await cleanupTestData()
+
+// 测试脚本必须在失败时返回非 0，避免 test:all 误判为通过。
+if (testRunner.failed > 0) {
+  process.exit(1)
+}

@@ -6,7 +6,7 @@
 import { Hono } from 'hono'
 import { initTestEnv, testRunner } from './test-utils.js'
 import { userModel, sessionModel } from '../src/models/index.js'
-import { userController } from '../src/controllers/UserController.js'
+import { authController } from '../src/controllers/AuthController.js'
 import { authMiddleware } from '../src/middleware/auth.js'
 
 await initTestEnv()
@@ -23,9 +23,9 @@ const credentials = {
 await userModel.createUser({ ...credentials })
 
 const app = new Hono()
-app.post('/login', async (c, next) => userController.login(c, next))
-app.post('/refresh', async (c, next) => userController.refreshToken(c, next))
-app.post('/logout', authMiddleware, async (c, next) => userController.logout(c, next))
+app.post('/login', async (c, next) => authController.login(c, next))
+app.post('/refresh', async (c, next) => authController.refreshToken(c, next))
+app.post('/logout', authMiddleware, async (c, next) => authController.logout(c, next))
 
 let accessToken
 let refreshToken
